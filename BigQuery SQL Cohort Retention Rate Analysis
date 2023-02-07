@@ -1,0 +1,53 @@
+WITH cohort_items as 
+  (
+    SELECT
+      user_id,
+      MIN(DATE(DATE_TRUNC(created_at, MONTH))) AS cohort_month
+    FROM `bigquery-public-data.thelook_ecommerce.order_items`
+    WHERE lower(status) = 'complete' 
+    AND EXTRACT(YEAR FROM created_at) = 2022
+    GROUP BY 1 
+  ),
+  cohort_size AS 
+  (
+    SELECT
+      cohort_month,
+      COUNT(DISTINCT user_id) as Number_users
+    FROM cohort_items 
+    GROUP BY 1
+    ORDER BY 1
+  ),
+  user_activities as 
+  (
+    SELECT
+      orders.user_id,
+      DATE_DIFF(DATE(DATE_TRUNC(created_at, MONTH)), cohort.cohort_month, MONTH) as Month_Number
+    FROM `bigquery-public-data.thelook_ecommerce.order_items` as orders
+    LEFT JOIN cohort_items as cohort
+    ON orders.user_id = cohort.user_id
+    WHERE EXTRACT(YEAR FROM created_at) = 2022
+  ),
+  retention as 
+  (
+    SELECT
+      cohort_items.cohort_month,
+      user_activities.month_number,
+      COUNT(DISTINCT user_activities.user_id) AS Number_Users
+    FROM user_activities
+    LEFT JOIN cohort_items 
+    ON user_activities.user_id = cohort_items.user_id
+    GROUP BY 1,2
+  )
+SELECT
+  retention.cohort_month as Cohort_Month,
+  FORMAT_DATE('%B %Y', retention.cohort_month) as CohortMonth,
+  cohort_size.Number_Users,
+  retention.Month_Number,
+  retention.number_users as Total_Users,
+  ROUND((CAST(retention.number_users as decimal)/ cohort_size.number_users)*100,2) || ' %' as Percentage
+FROM retention
+LEFT JOIN cohort_size
+  ON retention.cohort_month = cohort_size.cohort_month
+WHERE retention.cohort_month IS NOT NULL 
+      AND retention.month_number >= 0
+ORDER BY 1,4
